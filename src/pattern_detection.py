@@ -2,12 +2,19 @@
 
 import pandas as pd
 import numpy as np
-import talib as ta
 from typing import List, Dict, Any, Tuple
 from scipy.signal import find_peaks, find_peaks_cwt
 from scipy.stats import linregress
 import warnings
 warnings.filterwarnings('ignore')
+
+# Try to import talib, if not available use custom implementations
+try:
+    import talib as ta
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    print("TA-Lib not available for pattern detection, using custom implementations")
 
 class PatternDetection:
     """Class to detect various trading patterns"""
@@ -70,7 +77,7 @@ class PatternDetection:
         return patterns
     
     def detect_candlestick_patterns(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
-        """Detect candlestick patterns using TA-Lib"""
+        """Detect candlestick patterns using TA-Lib or custom implementations"""
         
         if len(data) < 10:
             return []
@@ -83,38 +90,240 @@ class PatternDetection:
         close_prices = data['Close'].values
         
         try:
-            for pattern_func in self.candlestick_patterns:
-                if hasattr(ta, pattern_func):
-                    # Get the pattern detection function
-                    func = getattr(ta, pattern_func)
-                    
-                    # Detect pattern
-                    result = func(open_prices, high_prices, low_prices, close_prices)
-                    
-                    # Find pattern occurrences
-                    pattern_indices = np.where(result != 0)[0]
-                    
-                    for idx in pattern_indices:
-                        if idx >= len(data) - 10:  # Only recent patterns
-                            pattern_strength = abs(result[idx])
-                            pattern_direction = 'Bullish' if result[idx] > 0 else 'Bearish'
-                            
-                            patterns.append({
-                                'type': 'Candlestick',
-                                'name': self.pattern_names.get(pattern_func, pattern_func),
-                                'direction': pattern_direction,
-                                'strength': self._get_strength_label(pattern_strength),
-                                'date': data.index[idx],
-                                'price': close_prices[idx],
-                                'description': self._get_pattern_description(pattern_func, pattern_direction),
-                                'success_rate': self._get_pattern_success_rate(pattern_func),
-                                'trade_suggestion': self._get_trade_suggestion(pattern_func, pattern_direction, close_prices[idx])
-                            })
-        
+            if TALIB_AVAILABLE:
+                # Use TA-Lib if available
+                for pattern_func in self.candlestick_patterns:
+                    if hasattr(ta, pattern_func):
+                        # Get the pattern detection function
+                        func = getattr(ta, pattern_func)
+                        
+                        # Detect pattern
+                        result = func(open_prices, high_prices, low_prices, close_prices)
+                        
+                        # Find pattern occurrences
+                        pattern_indices = np.where(result != 0)[0]
+                        
+                        for idx in pattern_indices:
+                            if idx >= len(data) - 10:  # Only recent patterns
+                                pattern_strength = abs(result[idx])
+                                pattern_direction = 'Bullish' if result[idx] > 0 else 'Bearish'
+                                
+                                patterns.append({
+                                    'type': 'candlestick',
+                                    'name': self.pattern_names.get(pattern_func, pattern_func),
+                                    'index': idx,
+                                    'date': data.index[idx] if hasattr(data.index, '__getitem__') else idx,
+                                    'direction': pattern_direction,
+                                    'strength': pattern_strength,
+                                    'description': f"{pattern_direction} {self.pattern_names.get(pattern_func, pattern_func)} detected"
+                                })
+            else:
+                # Use custom implementations
+                patterns.extend(self._detect_custom_patterns(data))
+                
         except Exception as e:
             print(f"Error detecting candlestick patterns: {str(e)}")
+            # Fallback to custom patterns
+            patterns.extend(self._detect_custom_patterns(data))
         
         return patterns
+    
+    def _detect_custom_patterns(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
+        """Custom candlestick pattern detection without TA-Lib"""
+        patterns = []
+        
+        open_prices = data['Open'].values
+        high_prices = data['High'].values
+        low_prices = data['Low'].values
+        close_prices = data['Close'].values
+        
+        # Check last 10 candles for patterns
+        start_idx = max(0, len(data) - 10)
+        
+        for i in range(start_idx, len(data)):
+            # Doji pattern
+            if self._is_doji(open_prices[i], high_prices[i], low_prices[i], close_prices[i]):
+                patterns.append({
+                    'type': 'candlestick',
+                    'name': 'Doji',
+                    'index': i,
+                    'date': data.index[i] if hasattr(data.index, '__getitem__') else i,
+                    'direction': 'Neutral',
+                    'strength': 1,
+                    'description': 'Doji pattern detected - market indecision'
+                })
+            
+            # Hammer pattern (need at least 2 candles)
+            if i > 0 and self._is_hammer(open_prices[i], high_prices[i], low_prices[i], close_prices[i], close_prices[i-1]):
+                patterns.append({
+                    'type': 'candlestick',
+                    'name': 'Hammer',
+                    'index': i,
+                    'date': data.index[i] if hasattr(data.index, '__getitem__') else i,
+                    'direction': 'Bullish',
+                    'strength': 2,
+                    'description': 'Hammer pattern detected - potential reversal'
+                })
+            
+            # Shooting Star pattern
+            if i > 0 and self._is_shooting_star(open_prices[i], high_prices[i], low_prices[i], close_prices[i], close_prices[i-1]):
+                patterns.append({
+                    'type': 'candlestick',
+                    'name': 'Shooting Star',
+                    'index': i,
+                    'date': data.index[i] if hasattr(data.index, '__getitem__') else i,
+                    'direction': 'Bearish',
+                    'strength': 2,
+                    'description': 'Shooting Star pattern detected - potential reversal'
+                })
+            
+            # Engulfing pattern (need at least 2 candles)
+            if i > 0:
+                engulfing = self._is_engulfing(
+                    open_prices[i-1], high_prices[i-1], low_prices[i-1], close_prices[i-1],
+                    open_prices[i], high_prices[i], low_prices[i], close_prices[i]
+                )
+                if engulfing:
+                    direction = 'Bullish' if close_prices[i] > open_prices[i] else 'Bearish'
+                    patterns.append({
+                        'type': 'candlestick',
+                        'name': 'Engulfing Pattern',
+                        'index': i,
+                        'date': data.index[i] if hasattr(data.index, '__getitem__') else i,
+                        'direction': direction,
+                        'strength': 3,
+                        'description': f'{direction} Engulfing pattern detected'
+                    })
+            
+            # Morning Star / Evening Star (need at least 3 candles)
+            if i >= 2:
+                star_pattern = self._is_star_pattern(
+                    open_prices[i-2:i+1], high_prices[i-2:i+1], 
+                    low_prices[i-2:i+1], close_prices[i-2:i+1]
+                )
+                if star_pattern:
+                    direction = star_pattern
+                    patterns.append({
+                        'type': 'candlestick',
+                        'name': f'{direction} Star',
+                        'index': i,
+                        'date': data.index[i] if hasattr(data.index, '__getitem__') else i,
+                        'direction': direction,
+                        'strength': 3,
+                        'description': f'{direction} Star pattern detected - strong reversal signal'
+                    })
+        
+        return patterns
+    
+    def _is_doji(self, open_price: float, high: float, low: float, close: float) -> bool:
+        """Check if candle is a Doji pattern"""
+        body_size = abs(close - open_price)
+        total_range = high - low
+        
+        if total_range == 0:
+            return False
+        
+        # Doji: body is very small compared to total range
+        return body_size / total_range < 0.1
+    
+    def _is_hammer(self, open_price: float, high: float, low: float, close: float, prev_close: float) -> bool:
+        """Check if candle is a Hammer pattern"""
+        body_size = abs(close - open_price)
+        lower_shadow = min(open_price, close) - low
+        upper_shadow = high - max(open_price, close)
+        total_range = high - low
+        
+        if total_range == 0 or body_size == 0:
+            return False
+        
+        # Hammer conditions:
+        # 1. Small body at the top
+        # 2. Long lower shadow (at least 2x body)
+        # 3. Little or no upper shadow
+        # 4. Appears after downtrend
+        is_small_body = body_size / total_range < 0.3
+        is_long_lower_shadow = lower_shadow >= 2 * body_size
+        is_small_upper_shadow = upper_shadow < body_size
+        is_after_downtrend = close < prev_close
+        
+        return is_small_body and is_long_lower_shadow and is_small_upper_shadow and is_after_downtrend
+    
+    def _is_shooting_star(self, open_price: float, high: float, low: float, close: float, prev_close: float) -> bool:
+        """Check if candle is a Shooting Star pattern"""
+        body_size = abs(close - open_price)
+        lower_shadow = min(open_price, close) - low
+        upper_shadow = high - max(open_price, close)
+        total_range = high - low
+        
+        if total_range == 0 or body_size == 0:
+            return False
+        
+        # Shooting Star conditions:
+        # 1. Small body at the bottom
+        # 2. Long upper shadow (at least 2x body)
+        # 3. Little or no lower shadow
+        # 4. Appears after uptrend
+        is_small_body = body_size / total_range < 0.3
+        is_long_upper_shadow = upper_shadow >= 2 * body_size
+        is_small_lower_shadow = lower_shadow < body_size
+        is_after_uptrend = close > prev_close
+        
+        return is_small_body and is_long_upper_shadow and is_small_lower_shadow and is_after_uptrend
+    
+    def _is_engulfing(self, prev_open: float, prev_high: float, prev_low: float, prev_close: float,
+                     curr_open: float, curr_high: float, curr_low: float, curr_close: float) -> bool:
+        """Check if current candle engulfs the previous candle"""
+        prev_body_top = max(prev_open, prev_close)
+        prev_body_bottom = min(prev_open, prev_close)
+        curr_body_top = max(curr_open, curr_close)
+        curr_body_bottom = min(curr_open, curr_close)
+        
+        # Current candle body must completely engulf previous candle body
+        engulfs = (curr_body_top > prev_body_top) and (curr_body_bottom < prev_body_bottom)
+        
+        # Different directions (one bullish, one bearish)
+        prev_bullish = prev_close > prev_open
+        curr_bullish = curr_close > curr_open
+        opposite_directions = prev_bullish != curr_bullish
+        
+        return engulfs and opposite_directions
+    
+    def _is_star_pattern(self, open_prices: np.ndarray, highs: np.ndarray, 
+                        lows: np.ndarray, closes: np.ndarray) -> str:
+        """Check for Morning Star or Evening Star pattern"""
+        if len(open_prices) < 3:
+            return None
+        
+        # First candle
+        first_body = abs(closes[0] - open_prices[0])
+        first_bullish = closes[0] > open_prices[0]
+        
+        # Second candle (star)
+        second_body = abs(closes[1] - open_prices[1])
+        second_high = max(open_prices[1], closes[1])
+        second_low = min(open_prices[1], closes[1])
+        
+        # Third candle
+        third_body = abs(closes[2] - open_prices[2])
+        third_bullish = closes[2] > open_prices[2]
+        
+        # Check for Morning Star (bullish reversal)
+        if (not first_bullish and  # First candle bearish
+            second_body < first_body * 0.5 and  # Small star body
+            second_high < min(open_prices[0], closes[0]) and  # Star gaps down
+            third_bullish and  # Third candle bullish
+            closes[2] > (open_prices[0] + closes[0]) / 2):  # Third closes above mid of first
+            return "Morning"
+        
+        # Check for Evening Star (bearish reversal)
+        if (first_bullish and  # First candle bullish
+            second_body < first_body * 0.5 and  # Small star body
+            second_low > max(open_prices[0], closes[0]) and  # Star gaps up
+            not third_bullish and  # Third candle bearish
+            closes[2] < (open_prices[0] + closes[0]) / 2):  # Third closes below mid of first
+            return "Evening"
+        
+        return None
     
     def detect_chart_patterns(self, data: pd.DataFrame) -> List[Dict[str, Any]]:
         """Detect chart patterns like triangles, wedges, flags, etc."""

@@ -2,10 +2,17 @@
 
 import pandas as pd
 import numpy as np
-import talib as ta
 from typing import Dict, Any, Tuple
 import warnings
 warnings.filterwarnings('ignore')
+
+# Try to import talib, if not available use custom implementations
+try:
+    import talib as ta
+    TALIB_AVAILABLE = True
+except ImportError:
+    TALIB_AVAILABLE = False
+    print("TA-Lib not available, using custom implementations")
 
 class TechnicalAnalysis:
     """Class to handle all technical analysis calculations"""
@@ -30,37 +37,65 @@ class TechnicalAnalysis:
         
         try:
             # Moving Averages
-            indicators['EMA_10'] = ta.EMA(close, timeperiod=10)
-            indicators['EMA_21'] = ta.EMA(close, timeperiod=21)
-            indicators['EMA_50'] = ta.EMA(close, timeperiod=50)
-            indicators['SMA_20'] = ta.SMA(close, timeperiod=20)
-            indicators['SMA_50'] = ta.SMA(close, timeperiod=50)
+            if TALIB_AVAILABLE:
+                indicators['EMA_10'] = ta.EMA(close, timeperiod=10)
+                indicators['EMA_21'] = ta.EMA(close, timeperiod=21)
+                indicators['EMA_50'] = ta.EMA(close, timeperiod=50)
+                indicators['SMA_20'] = ta.SMA(close, timeperiod=20)
+                indicators['SMA_50'] = ta.SMA(close, timeperiod=50)
+            else:
+                indicators['EMA_10'] = self.calculate_ema(close, 10)
+                indicators['EMA_21'] = self.calculate_ema(close, 21)
+                indicators['EMA_50'] = self.calculate_ema(close, 50)
+                indicators['SMA_20'] = self.calculate_sma(close, 20)
+                indicators['SMA_50'] = self.calculate_sma(close, 50)
             
             # Momentum Indicators
-            indicators['RSI'] = ta.RSI(close, timeperiod=14)
-            indicators['MACD'], indicators['MACD_signal'], indicators['MACD_hist'] = ta.MACD(close)
-            indicators['STOCH_K'], indicators['STOCH_D'] = ta.STOCH(high, low, close)
-            indicators['CCI'] = ta.CCI(high, low, close, timeperiod=14)
-            indicators['ADX'] = ta.ADX(high, low, close, timeperiod=14)
-            indicators['AROON_UP'], indicators['AROON_DOWN'] = ta.AROON(high, low, timeperiod=14)
+            if TALIB_AVAILABLE:
+                indicators['RSI'] = ta.RSI(close, timeperiod=14)
+                indicators['MACD'], indicators['MACD_signal'], indicators['MACD_hist'] = ta.MACD(close)
+                indicators['STOCH_K'], indicators['STOCH_D'] = ta.STOCH(high, low, close)
+                indicators['CCI'] = ta.CCI(high, low, close, timeperiod=14)
+                indicators['ADX'] = ta.ADX(high, low, close, timeperiod=14)
+                indicators['AROON_UP'], indicators['AROON_DOWN'] = ta.AROON(high, low, timeperiod=14)
+            else:
+                indicators['RSI'] = self.calculate_rsi(close, 14)
+                indicators['MACD'], indicators['MACD_signal'], indicators['MACD_hist'] = self.calculate_macd(close)
+                indicators['STOCH_K'], indicators['STOCH_D'] = self.calculate_stochastic(high, low, close)
+                indicators['CCI'] = self.calculate_cci(high, low, close, 14)
+                indicators['ADX'] = self.calculate_adx(high, low, close, 14)
+                indicators['AROON_UP'], indicators['AROON_DOWN'] = self.calculate_aroon(high, low, 14)
             
             # Volatility Indicators
-            indicators['BB_UPPER'], indicators['BB_MIDDLE'], indicators['BB_LOWER'] = ta.BBANDS(close)
-            indicators['ATR'] = ta.ATR(high, low, close, timeperiod=14)
+            if TALIB_AVAILABLE:
+                indicators['BB_UPPER'], indicators['BB_MIDDLE'], indicators['BB_LOWER'] = ta.BBANDS(close)
+                indicators['ATR'] = ta.ATR(high, low, close, timeperiod=14)
+            else:
+                indicators['BB_UPPER'], indicators['BB_MIDDLE'], indicators['BB_LOWER'] = self.calculate_bollinger_bands(close)
+                indicators['ATR'] = self.calculate_atr(high, low, close, 14)
             
             # Volume Indicators
-            indicators['OBV'] = ta.OBV(close, volume)
-            indicators['AD'] = ta.AD(high, low, close, volume)
-            indicators['ADOSC'] = ta.ADOSC(high, low, close, volume)
+            if TALIB_AVAILABLE:
+                indicators['OBV'] = ta.OBV(close, volume)
+                indicators['AD'] = ta.AD(high, low, close, volume)
+                indicators['ADOSC'] = ta.ADOSC(high, low, close, volume)
+            else:
+                indicators['OBV'] = self.calculate_obv(close, volume)
+                indicators['AD'] = self.calculate_ad(high, low, close, volume)
+                indicators['ADOSC'] = self.calculate_adosc(high, low, close, volume)
             
             # Trend Indicators
-            indicators['SAR'] = ta.SAR(high, low)
-            indicators['TEMA'] = ta.TEMA(close, timeperiod=30)
+            if TALIB_AVAILABLE:
+                indicators['SAR'] = ta.SAR(high, low)
+                indicators['TEMA'] = ta.TEMA(close, timeperiod=30)
+            else:
+                indicators['SAR'] = self.calculate_sar(high, low)
+                indicators['TEMA'] = self.calculate_tema(close, 30)
             
             # Custom indicators
             indicators['VWAP'] = self.calculate_vwap(data)
             indicators['PRICE_CHANGE'] = self.calculate_price_change(close)
-            indicators['VOLUME_MA'] = ta.SMA(volume, timeperiod=20)
+            indicators['VOLUME_MA'] = self.calculate_sma(volume, 20)
             indicators['VOLUME_RATIO'] = volume / indicators['VOLUME_MA']
             
             # Support and Resistance levels
@@ -74,6 +109,252 @@ class TechnicalAnalysis:
             return {}
         
         return indicators
+    
+    def calculate_sma(self, data: np.ndarray, period: int) -> np.ndarray:
+        """Calculate Simple Moving Average"""
+        sma = np.full_like(data, np.nan)
+        for i in range(period - 1, len(data)):
+            sma[i] = np.mean(data[i - period + 1:i + 1])
+        return sma
+    
+    def calculate_ema(self, data: np.ndarray, period: int) -> np.ndarray:
+        """Calculate Exponential Moving Average"""
+        ema = np.full_like(data, np.nan)
+        alpha = 2.0 / (period + 1)
+        
+        # Initialize with first value
+        ema[0] = data[0]
+        
+        for i in range(1, len(data)):
+            ema[i] = alpha * data[i] + (1 - alpha) * ema[i - 1]
+        
+        return ema
+    
+    def calculate_rsi(self, data: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Relative Strength Index"""
+        delta = np.diff(data)
+        gain = np.where(delta > 0, delta, 0)
+        loss = np.where(delta < 0, -delta, 0)
+        
+        avg_gain = np.full(len(data), np.nan)
+        avg_loss = np.full(len(data), np.nan)
+        
+        # Initial averages
+        avg_gain[period] = np.mean(gain[:period])
+        avg_loss[period] = np.mean(loss[:period])
+        
+        # Calculate smoothed averages
+        for i in range(period + 1, len(data)):
+            avg_gain[i] = (avg_gain[i-1] * (period - 1) + gain[i-1]) / period
+            avg_loss[i] = (avg_loss[i-1] * (period - 1) + loss[i-1]) / period
+        
+        rs = avg_gain / avg_loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        return rsi
+    
+    def calculate_macd(self, data: np.ndarray, fast: int = 12, slow: int = 26, signal: int = 9) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Calculate MACD indicator"""
+        ema_fast = self.calculate_ema(data, fast)
+        ema_slow = self.calculate_ema(data, slow)
+        
+        macd_line = ema_fast - ema_slow
+        signal_line = self.calculate_ema(macd_line, signal)
+        histogram = macd_line - signal_line
+        
+        return macd_line, signal_line, histogram
+    
+    def calculate_bollinger_bands(self, data: np.ndarray, period: int = 20, std_dev: float = 2) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Calculate Bollinger Bands"""
+        sma = self.calculate_sma(data, period)
+        std = np.full_like(data, np.nan)
+        
+        for i in range(period - 1, len(data)):
+            std[i] = np.std(data[i - period + 1:i + 1])
+        
+        upper_band = sma + (std * std_dev)
+        lower_band = sma - (std * std_dev)
+        
+        return upper_band, sma, lower_band
+    
+    def calculate_stochastic(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> Tuple[np.ndarray, np.ndarray]:
+        """Calculate Stochastic Oscillator"""
+        stoch_k = np.full_like(close, np.nan)
+        
+        for i in range(period - 1, len(close)):
+            lowest_low = np.min(low[i - period + 1:i + 1])
+            highest_high = np.max(high[i - period + 1:i + 1])
+            
+            if highest_high != lowest_low:
+                stoch_k[i] = ((close[i] - lowest_low) / (highest_high - lowest_low)) * 100
+            else:
+                stoch_k[i] = 50
+        
+        stoch_d = self.calculate_sma(stoch_k, 3)
+        
+        return stoch_k, stoch_d
+    
+    def calculate_atr(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Average True Range"""
+        true_range = np.zeros(len(close))
+        
+        for i in range(1, len(close)):
+            hl = high[i] - low[i]
+            hc = abs(high[i] - close[i-1])
+            lc = abs(low[i] - close[i-1])
+            true_range[i] = max(hl, hc, lc)
+        
+        # Calculate ATR using EMA
+        return self.calculate_ema(true_range, period)
+    
+    def calculate_obv(self, close: np.ndarray, volume: np.ndarray) -> np.ndarray:
+        """Calculate On-Balance Volume"""
+        obv = np.zeros(len(close))
+        
+        for i in range(1, len(close)):
+            if close[i] > close[i-1]:
+                obv[i] = obv[i-1] + volume[i]
+            elif close[i] < close[i-1]:
+                obv[i] = obv[i-1] - volume[i]
+            else:
+                obv[i] = obv[i-1]
+        
+        return obv
+    
+    def calculate_ad(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray) -> np.ndarray:
+        """Calculate Accumulation/Distribution Line"""
+        ad = np.zeros(len(close))
+        
+        for i in range(len(close)):
+            if high[i] != low[i]:
+                clv = ((close[i] - low[i]) - (high[i] - close[i])) / (high[i] - low[i])
+            else:
+                clv = 0
+            ad[i] = ad[i-1] + clv * volume[i] if i > 0 else clv * volume[i]
+        
+        return ad
+    
+    def calculate_adosc(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, volume: np.ndarray, fast: int = 3, slow: int = 10) -> np.ndarray:
+        """Calculate Accumulation/Distribution Oscillator"""
+        ad = self.calculate_ad(high, low, close, volume)
+        fast_ema = self.calculate_ema(ad, fast)
+        slow_ema = self.calculate_ema(ad, slow)
+        
+        return fast_ema - slow_ema
+    
+    def calculate_cci(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Commodity Channel Index"""
+        typical_price = (high + low + close) / 3
+        sma_tp = self.calculate_sma(typical_price, period)
+        
+        cci = np.full_like(close, np.nan)
+        
+        for i in range(period - 1, len(close)):
+            mean_deviation = np.mean(np.abs(typical_price[i - period + 1:i + 1] - sma_tp[i]))
+            if mean_deviation != 0:
+                cci[i] = (typical_price[i] - sma_tp[i]) / (0.015 * mean_deviation)
+        
+        return cci
+    
+    def calculate_adx(self, high: np.ndarray, low: np.ndarray, close: np.ndarray, period: int = 14) -> np.ndarray:
+        """Calculate Average Directional Index"""
+        # Simplified ADX calculation
+        tr = self.calculate_atr(high, low, close, 1)
+        dm_plus = np.zeros(len(close))
+        dm_minus = np.zeros(len(close))
+        
+        for i in range(1, len(close)):
+            up_move = high[i] - high[i-1]
+            down_move = low[i-1] - low[i]
+            
+            if up_move > down_move and up_move > 0:
+                dm_plus[i] = up_move
+            if down_move > up_move and down_move > 0:
+                dm_minus[i] = down_move
+        
+        di_plus = 100 * self.calculate_ema(dm_plus, period) / self.calculate_ema(tr, period)
+        di_minus = 100 * self.calculate_ema(dm_minus, period) / self.calculate_ema(tr, period)
+        
+        dx = 100 * np.abs(di_plus - di_minus) / (di_plus + di_minus)
+        adx = self.calculate_ema(dx, period)
+        
+        return adx
+    
+    def calculate_aroon(self, high: np.ndarray, low: np.ndarray, period: int = 14) -> Tuple[np.ndarray, np.ndarray]:
+        """Calculate Aroon Up and Aroon Down"""
+        aroon_up = np.full_like(high, np.nan)
+        aroon_down = np.full_like(low, np.nan)
+        
+        for i in range(period, len(high)):
+            high_period = high[i - period:i + 1]
+            low_period = low[i - period:i + 1]
+            
+            high_idx = np.argmax(high_period)
+            low_idx = np.argmin(low_period)
+            
+            aroon_up[i] = ((period - high_idx) / period) * 100
+            aroon_down[i] = ((period - low_idx) / period) * 100
+        
+        return aroon_up, aroon_down
+    
+    def calculate_sar(self, high: np.ndarray, low: np.ndarray, acceleration: float = 0.02, maximum: float = 0.2) -> np.ndarray:
+        """Calculate Parabolic SAR"""
+        sar = np.full_like(high, np.nan)
+        trend = np.full_like(high, np.nan)
+        ep = np.full_like(high, np.nan)
+        af = np.full_like(high, np.nan)
+        
+        # Initialize
+        sar[0] = low[0]
+        trend[0] = 1  # 1 for uptrend, -1 for downtrend
+        ep[0] = high[0]
+        af[0] = acceleration
+        
+        for i in range(1, len(high)):
+            if trend[i-1] == 1:  # Uptrend
+                sar[i] = sar[i-1] + af[i-1] * (ep[i-1] - sar[i-1])
+                
+                if low[i] <= sar[i]:
+                    trend[i] = -1
+                    sar[i] = ep[i-1]
+                    ep[i] = low[i]
+                    af[i] = acceleration
+                else:
+                    trend[i] = 1
+                    if high[i] > ep[i-1]:
+                        ep[i] = high[i]
+                        af[i] = min(af[i-1] + acceleration, maximum)
+                    else:
+                        ep[i] = ep[i-1]
+                        af[i] = af[i-1]
+            else:  # Downtrend
+                sar[i] = sar[i-1] + af[i-1] * (ep[i-1] - sar[i-1])
+                
+                if high[i] >= sar[i]:
+                    trend[i] = 1
+                    sar[i] = ep[i-1]
+                    ep[i] = high[i]
+                    af[i] = acceleration
+                else:
+                    trend[i] = -1
+                    if low[i] < ep[i-1]:
+                        ep[i] = low[i]
+                        af[i] = min(af[i-1] + acceleration, maximum)
+                    else:
+                        ep[i] = ep[i-1]
+                        af[i] = af[i-1]
+        
+        return sar
+    
+    def calculate_tema(self, data: np.ndarray, period: int) -> np.ndarray:
+        """Calculate Triple Exponential Moving Average"""
+        ema1 = self.calculate_ema(data, period)
+        ema2 = self.calculate_ema(ema1, period)
+        ema3 = self.calculate_ema(ema2, period)
+        
+        tema = 3 * ema1 - 3 * ema2 + ema3
+        
+        return tema
     
     def calculate_vwap(self, data: pd.DataFrame) -> np.ndarray:
         """Calculate Volume Weighted Average Price"""
