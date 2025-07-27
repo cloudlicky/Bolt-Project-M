@@ -80,6 +80,24 @@ Navigate to `http://localhost:8501`
 2. Go to [share.streamlit.io](https://share.streamlit.io)
 3. Deploy directly from your GitHub repository
 
+## 🚀 Deployment
+
+### Quick Deploy Options
+
+**Streamlit Cloud (Recommended - Free):**
+1. Go to [share.streamlit.io](https://share.streamlit.io)
+2. Sign in with GitHub
+3. Select repository: `cloudlicky/Bolt-Project-M`
+4. Set main file: `app.py`
+5. Deploy!
+
+**Other Platforms:**
+- **Heroku**: Use the included `Procfile`
+- **Render**: Use the included `render.yaml`
+- **Railway**: Connect GitHub repository
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+
 ## 📖 How to Use
 
 ### 1. **Stock Selection**
